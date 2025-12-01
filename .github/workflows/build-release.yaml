@@ -57,8 +57,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ needs.build-and-tag.outputs.vars_version }}
-          release_name: aws-compose-service (${{ needs.build-and-tag.outputs.vars_version }})
+          tag_name: ${{ needs.build-and-tag.outputs.version }}
+          release_name: aws-compose-service (${{ needs.build-and-tag.outputs.version }})
           draft: false
           prerelease: false
       - name: Upload binary as release asset
