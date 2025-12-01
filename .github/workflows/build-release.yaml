@@ -1,0 +1,74 @@
+name: Build and Release
+on:
+  push:
+    branches:
+      - master
+permissions:
+  contents: write
+jobs:
+  build-and-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: Tidy modules
+        run: go mod tidy
+      - name: Build aws-compose-service binary
+        run: go build -o aws-compose-service .
+      - name: Upload aws-compose-service artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-compose-service
+          path: aws-compose-service
+          if-no-files-found: error
+      - name: Generate version tag
+        id: vars
+        run: |
+          VERSION="v0.0.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.vars.outputs.version }}"
+          git push origin "${{ steps.vars.outputs.version }}"
+
+  release:
+    needs: build-and-tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download aws-compose-service artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: aws-compose-service
+          path: .
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.build-and-tag.outputs.version }}
+          release_name: aws-compose-service (${{ needs.build-and-tag.outputs.version }})
+          draft: false
+          prerelease: false
+      - name: Upload binary as release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./aws-compose-service
+          asset_name: aws-compose-service
+          asset_content_type: application/octet-stream
