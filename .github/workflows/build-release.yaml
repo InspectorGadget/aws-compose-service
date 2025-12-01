@@ -4,7 +4,7 @@ on:
     branches:
       - master
 jobs:
-  build-and-test:
+  build-and-artifact:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -28,3 +28,23 @@ jobs:
           name: aws-compose-service
           path: aws-compose-service
           if-no-files-found: error
+
+  release:
+    needs: build-and-artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download aws-compose-service artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: aws-compose-service
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v0.0.${{ github.run_number }}
+          release_name: Release v0.0.${{ github.run_number }}
+          draft: true
+          prerelease: false
