@@ -15,44 +15,94 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache: true
-      - name: Tidy modules
-        run: go mod tidy
-      - name: Build aws-compose-service binary
-        run: go build -o aws-compose-service .
-      - name: Upload aws-compose-service artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aws-compose-service
-          path: aws-compose-service
-          if-no-files-found: error
+
       - name: Generate version tag
         id: vars
         run: |
           VERSION="v0.0.${{ github.run_number }}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-      - name: Create and push tag
+
+      - name: Configure git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push tag
+        run: |
           git tag "${{ steps.vars.outputs.version }}"
           git push origin "${{ steps.vars.outputs.version }}"
 
-  release:
+  build-matrix:
     needs: build-and-tag
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+
+          # macOS
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+
+          # Windows
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Build for ${{ matrix.goos }}-${{ matrix.goarch }}
+        run: |
+          OUTPUT="aws-compose-service-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            OUTPUT="${OUTPUT}.exe"
+          fi
+
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o "$OUTPUT" .
+          echo "OUTPUT=$OUTPUT" >> "$GITHUB_ENV"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-compose-service-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ env.OUTPUT }}
+          if-no-files-found: error
+
+  release:
+    needs:
+      - build-and-tag
+      - build-matrix
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
-      - name: Download aws-compose-service artifact
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: aws-compose-service
-          path: .
+          path: ./dist
+
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -63,12 +113,16 @@ jobs:
           release_name: aws-compose-service (${{ needs.build-and-tag.outputs.version }})
           draft: false
           prerelease: false
-      - name: Upload binary as release asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./aws-compose-service
-          asset_name: aws-compose-service
-          asset_content_type: application/octet-stream
+
+      - name: Upload all binaries as release assets
+        run: |
+          for file in dist/*/*; do
+            echo "Uploading $file"
+            curl \
+              -sSL \
+              -X POST \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$file" \
+              "${{ steps.create_release.outputs.upload_url }}?name=$(basename "$file")"
+          done
